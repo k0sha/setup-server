@@ -1,6 +1,6 @@
 # setup-server
 
-Bash-скрипт автоматизированной настройки сервера Ubuntu 24.04 и деплоя [Remnawave Node](https://remnawave.org).
+Bash-скрипт автоматизированной настройки сервера Ubuntu 24.04.
 
 ## Что делает
 
@@ -8,12 +8,11 @@ Bash-скрипт автоматизированной настройки сер
 - Обновление системы, установка временной зоны, hostname
 - Создание пользователя с sudo, SSH-ключом и безопасным паролем
 - Харденинг SSH (кастомный порт, отключение root и password auth)
-- Настройка UFW (80, 443, SSH, VLESS, NODE_PORT)
+- Настройка UFW (80, 443, SSH и дополнительные порты)
 - Опционально: отключение systemd-resolved, удаление Zabbix Agent
 
-**Фаза 2 — деплой ноды (deploy user):**
+**Фаза 2 — деплой сервисов (deploy user):**
 - Установка Docker Engine
-- Деплой Remnawave Node (docker compose)
 - Установка acme.sh, получение SSL-сертификата (Let's Encrypt, HTTP-01)
 - Деплой Nginx (reverse proxy + заглушка)
 - Настройка авторенью сертификата
@@ -24,7 +23,6 @@ Bash-скрипт автоматизированной настройки сер
 - Ubuntu 24.04
 - Чистый сервер (или повторный запуск — идемпотентен для большинства шагов)
 - Домен с A-записью, указывающей на IP сервера
-- NODE_PORT и SECRET_KEY из панели Remnawave
 
 ## Быстрый старт
 
@@ -64,9 +62,6 @@ sudo bash /opt/setup-server/setup-server.sh --deploy
   setup-server.sh       # скрипт
   setup-server.log      # лог фазы 1
   deploy-info.txt       # итоговая сводка (без паролей и ключей)
-
-/opt/remnanode/
-  docker-compose.yml    # Remnawave Node
 
 /opt/nginx/
   nginx.conf
