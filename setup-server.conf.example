@@ -1,0 +1,58 @@
+# ============================================================
+#  setup-server.conf.example
+#
+#  Скопируй в setup-server.conf рядом со скриптом,
+#  заполни все поля и запусти: sudo bash setup-server.sh
+#
+#  Конфиг с секретами НЕ добавляй в git (.gitignore уже настроен).
+# ============================================================
+
+# ── Блок СЕРВЕР ──────────────────────────────────────────────
+
+# Временная зона (примеры: Europe/Moscow, Asia/Yekaterinburg, UTC)
+TIMEZONE=Europe/Moscow
+
+# Hostname сервера
+SERVER_HOSTNAME=
+
+# Имя нового пользователя (sudo)
+DEPLOY_USER=
+
+# Пароль пользователя
+# Если оставить пустым — скрипт предложит случайный безопасный пароль
+USER_PASS=
+
+# Публичный SSH-ключ (ssh-ed25519 AAAA... или ssh-rsa AAAA...)
+YOUR_SSH_PUBKEY=
+
+# SSH порт (рекомендуется нестандартный, 49152–65535)
+SSH_PORT=
+
+# Отключить systemd-resolved? (y/n)
+# Отключение устраняет «открытый порт 53» в аудиторах
+DISABLE_RESOLVED=n
+
+# Удалить Zabbix Agent? (y/n)
+REMOVE_ZABBIX=n
+
+# Дополнительные порты UFW через пробел в формате PORT/PROTOCOL|COMMENT
+# Пример: ("9443/tcp|nginx-alt" "8080/tcp|custom")
+# Оставь пустым если доп. портов нет
+declare -A EXTRA_PORTS=()
+
+# ── Блок НОДА ────────────────────────────────────────────────
+
+# Email для acme.sh (Let's Encrypt уведомления)
+ACME_EMAIL=
+
+# Домен для SSL-сертификата (должна быть настроена A-запись на IP сервера)
+DOMAIN=
+
+# VLESS Reality порт (можно оставить — скрипт предложит случайный)
+VLESS_PORT=
+
+# NODE_PORT из панели Remnawave
+NODE_PORT=
+
+# SECRET_KEY из панели Remnawave
+SECRET_KEY=
