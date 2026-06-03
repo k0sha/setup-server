@@ -1106,6 +1106,19 @@ fi
 "$ACME" --set-default-ca --server letsencrypt >> "$SETUP_LOG" 2>&1 || true
 ok "acme.sh CA: Let's Encrypt"
 
+# Явная регистрация аккаунта. Если в ~/.acme.sh/ca осталось битое
+# состояние от прошлых запусков (accountDoesNotExist) — сносим и
+# регистрируем заново.
+if ! "$ACME" --register-account --server letsencrypt -m "$ACME_EMAIL" \
+        >> "$SETUP_LOG" 2>&1; then
+    warn "Регистрация аккаунта не удалась — чистим состояние и повторяем..."
+    rm -rf "$HOME/.acme.sh/ca"
+    "$ACME" --register-account --server letsencrypt -m "$ACME_EMAIL" \
+        >> "$SETUP_LOG" 2>&1 \
+        || err "Не удалось зарегистрировать аккаунт acme.sh, смотри $SETUP_LOG"
+fi
+ok "acme.sh аккаунт зарегистрирован ($ACME_EMAIL)"
+
 sudo mkdir -p /opt/nginx
 sudo chown "$DEPLOY_USER:$DEPLOY_USER" /opt/nginx
 
@@ -1338,9 +1351,10 @@ else
 fi
 
 info "Получаем сертификат для $DOMAIN (HTTP-01 webroot)..."
+_ISSUE_FORCE=""
 while true; do
     if "$ACME" --issue --webroot /opt/nginx/www \
-        -d "$DOMAIN" \
+        -d "$DOMAIN" $_ISSUE_FORCE \
         --key-file /opt/nginx/privkey.key \
         --fullchain-file /opt/nginx/fullchain.pem \
         >> "$SETUP_LOG" 2>&1; then
@@ -1348,6 +1362,18 @@ while true; do
     fi
     echo ""
     warn "Не удалось получить сертификат для $DOMAIN"
+
+    # Авто-восстановление при битом состоянии аккаунта
+    # (accountDoesNotExist / No such challenge) — чистим ca и
+    # регистрируемся заново, дальше выпускаем с --force.
+    if tail -40 "$SETUP_LOG" | grep -qE "accountDoesNotExist|No such challenge"; then
+        warn "Обнаружено битое состояние аккаунта acme.sh — пересоздаём..."
+        rm -rf "$HOME/.acme.sh/ca"
+        "$ACME" --register-account --server letsencrypt -m "$ACME_EMAIL" \
+            >> "$SETUP_LOG" 2>&1 || true
+        _ISSUE_FORCE="--force"
+    fi
+
     echo "  Частые причины:"
     echo "    • DNS ещё не обновились (propagation до 1 часа)"
     echo "    • Порт 80 недоступен извне"
@@ -1359,7 +1385,7 @@ while true; do
     case "${_RETRY,,}" in
         n) warn "Пропускаем — используем текущий сертификат"; break ;;
         q) err "Получение сертификата отменено. Лог: $SETUP_LOG" ;;
-        *) info "Повторяем..." ;;
+        *) info "Повторяем..."; _ISSUE_FORCE="--force" ;;
     esac
 done
 ok "Сертификат → /opt/nginx/{fullchain.pem, privkey.key}"
