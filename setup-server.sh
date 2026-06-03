@@ -1367,8 +1367,11 @@ while true; do
     # (accountDoesNotExist / No such challenge) — чистим ca и
     # регистрируемся заново, дальше выпускаем с --force.
     if tail -40 "$SETUP_LOG" | grep -qE "accountDoesNotExist|No such challenge"; then
-        warn "Обнаружено битое состояние аккаунта acme.sh — пересоздаём..."
+        warn "Обнаружено битое состояние acme.sh — чистим аккаунт и кэш заказа..."
         rm -rf "$HOME/.acme.sh/ca"
+        # Кэш заказа/challenge домена тоже привязан к мёртвому аккаунту —
+        # без его удаления остаётся "No such challenge".
+        rm -rf "$HOME/.acme.sh/${DOMAIN}_ecc" "$HOME/.acme.sh/${DOMAIN}"
         "$ACME" --register-account --server letsencrypt -m "$ACME_EMAIL" \
             >> "$SETUP_LOG" 2>&1 || true
         _ISSUE_FORCE="--force"
