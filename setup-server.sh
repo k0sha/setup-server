@@ -1103,17 +1103,22 @@ else
     ok "acme.sh установлен ($ACME_EMAIL)"
 fi
 
-"$ACME" --set-default-ca --server letsencrypt >> "$SETUP_LOG" 2>&1 || true
+# Текущий ЦС. Если у Let's Encrypt проблемы на стороне сервиса
+# (accountDoesNotExist / registration not found при finalize) —
+# в шаге 5.1 происходит авто-фоллбэк на ZeroSSL.
+ACME_SERVER="letsencrypt"
+
+"$ACME" --set-default-ca --server "$ACME_SERVER" >> "$SETUP_LOG" 2>&1 || true
 ok "acme.sh CA: Let's Encrypt"
 
 # Явная регистрация аккаунта. Если в ~/.acme.sh/ca осталось битое
 # состояние от прошлых запусков (accountDoesNotExist) — сносим и
 # регистрируем заново.
-if ! "$ACME" --register-account --server letsencrypt -m "$ACME_EMAIL" \
+if ! "$ACME" --register-account --server "$ACME_SERVER" -m "$ACME_EMAIL" \
         >> "$SETUP_LOG" 2>&1; then
     warn "Регистрация аккаунта не удалась — чистим состояние и повторяем..."
     rm -rf "$HOME/.acme.sh/ca"
-    "$ACME" --register-account --server letsencrypt -m "$ACME_EMAIL" \
+    "$ACME" --register-account --server "$ACME_SERVER" -m "$ACME_EMAIL" \
         >> "$SETUP_LOG" 2>&1 \
         || err "Не удалось зарегистрировать аккаунт acme.sh, смотри $SETUP_LOG"
 fi
@@ -1352,9 +1357,10 @@ fi
 
 info "Получаем сертификат для $DOMAIN (HTTP-01 webroot)..."
 _ISSUE_FORCE=""
+_ACCT_FIXES=0
 while true; do
     if "$ACME" --issue --webroot /opt/nginx/www \
-        -d "$DOMAIN" $_ISSUE_FORCE \
+        -d "$DOMAIN" $_ISSUE_FORCE --server "$ACME_SERVER" \
         --key-file /opt/nginx/privkey.key \
         --fullchain-file /opt/nginx/fullchain.pem \
         >> "$SETUP_LOG" 2>&1; then
@@ -1363,18 +1369,32 @@ while true; do
     echo ""
     warn "Не удалось получить сертификат для $DOMAIN"
 
-    # Авто-восстановление при битом состоянии аккаунта
-    # (accountDoesNotExist / No such challenge) — чистим ca и
-    # регистрируемся заново, дальше выпускаем с --force.
-    if tail -40 "$SETUP_LOG" | grep -qE "accountDoesNotExist|No such challenge"; then
-        warn "Обнаружено битое состояние acme.sh — чистим аккаунт и кэш заказа..."
-        rm -rf "$HOME/.acme.sh/ca"
-        # Кэш заказа/challenge домена тоже привязан к мёртвому аккаунту —
-        # без его удаления остаётся "No such challenge".
-        rm -rf "$HOME/.acme.sh/${DOMAIN}_ecc" "$HOME/.acme.sh/${DOMAIN}"
-        "$ACME" --register-account --server letsencrypt -m "$ACME_EMAIL" \
-            >> "$SETUP_LOG" 2>&1 || true
+    # Авто-восстановление при битом состоянии аккаунта.
+    # Триггеры: accountDoesNotExist / No such challenge / registration ... not found.
+    if tail -40 "$SETUP_LOG" \
+            | grep -qE "accountDoesNotExist|No such challenge|registration with ID '[0-9]+' not found" \
+            && [[ "$_ACCT_FIXES" -lt 4 ]]; then
+        _ACCT_FIXES=$((_ACCT_FIXES + 1))
+
+        if [[ "$ACME_SERVER" == "letsencrypt" && "$_ACCT_FIXES" -ge 2 ]]; then
+            # Чистка не помогла дважды — у Let's Encrypt проблема на их
+            # стороне. Переключаемся на ZeroSSL.
+            warn "Let's Encrypt стабильно отвергает аккаунт — переключаемся на ZeroSSL..."
+            ACME_SERVER="zerossl"
+            "$ACME" --register-account --server zerossl -m "$ACME_EMAIL" \
+                >> "$SETUP_LOG" 2>&1 || true
+        else
+            warn "Обнаружено битое состояние acme.sh — чистим аккаунт и кэш заказа..."
+            rm -rf "$HOME/.acme.sh/ca"
+            # Кэш заказа/challenge домена тоже привязан к мёртвому аккаунту —
+            # без его удаления остаётся "No such challenge".
+            rm -rf "$HOME/.acme.sh/${DOMAIN}_ecc" "$HOME/.acme.sh/${DOMAIN}"
+            "$ACME" --register-account --server "$ACME_SERVER" -m "$ACME_EMAIL" \
+                >> "$SETUP_LOG" 2>&1 || true
+        fi
         _ISSUE_FORCE="--force"
+        info "Повторяем выпуск (CA: $ACME_SERVER)..."
+        continue
     fi
 
     echo "  Частые причины:"
@@ -1393,14 +1413,16 @@ while true; do
 done
 ok "Сертификат → /opt/nginx/{fullchain.pem, privkey.key}"
 
-sudo docker compose -f /opt/nginx/docker-compose.yml exec nginx nginx -s reload \
+sudo docker compose -f /opt/nginx/docker-compose.yml exec -T nginx nginx -s reload \
     >> "$SETUP_LOG" 2>&1 || true
 ok "Nginx перезагружен с реальным сертификатом"
 
+# reloadcmd выполняется из cron (без TTY) — флаг -T обязателен,
+# иначе docker compose exec падает с "the input device is not a TTY".
 "$ACME" --install-cert -d "$DOMAIN" \
     --key-file /opt/nginx/privkey.key \
     --fullchain-file /opt/nginx/fullchain.pem \
-    --reloadcmd "docker compose -f /opt/nginx/docker-compose.yml exec nginx nginx -s reload" \
+    --reloadcmd "docker compose -f /opt/nginx/docker-compose.yml exec -T nginx nginx -s reload" \
     >> "$SETUP_LOG" 2>&1 || true
 ok "Авторенью настроен (webroot — без остановки nginx)"
 
