@@ -22,6 +22,13 @@ DEPLOY_CONFIG="/tmp/_setup-server.conf"
 SCRIPT_PATH="$(readlink -f "$0")"
 SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 
+# ── Неинтерактивный режим (без debconf/needrestart диалогов) ──
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+# Конфликты conffile решаем в пользу старой версии, без вопросов
+APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+
 # ── Флаг фазы ────────────────────────────────────────────────
 DEPLOY_PHASE=false
 [[ "${1:-}" == "--deploy" ]] && DEPLOY_PHASE=true
@@ -533,7 +540,7 @@ echo ""
 sep; info "ПУНКТ 1 — Базовая настройка системы"; sep
 
 qs "Обновляем пакеты (apt update)" apt-get update
-qs "Устанавливаем обновления (apt upgrade)" apt-get upgrade -y
+qs "Устанавливаем обновления (apt upgrade)" apt-get upgrade "${APT_OPTS[@]}"
 echo ""
 
 q timedatectl set-timezone "$TIMEZONE"
@@ -718,7 +725,7 @@ backend  = systemd
 enabled  = true
 port     = $SSH_PORT
 filter   = sshd
-logpath  = /var/log/auth.log
+backend  = systemd
 maxretry = 3
 bantime  = 86400
 
@@ -745,9 +752,17 @@ nginx_access_log = /opt/nginx/nginx-logs/access.log
 nginx_error_log  = /opt/nginx/nginx-logs/error.log
 EOF
 
+# nginx ещё не развёрнут — создаём пустые логи, иначе nginx-джейлы
+# падают с "Have not found any log file" и валят старт fail2ban
+mkdir -p /opt/nginx/nginx-logs
+touch /opt/nginx/nginx-logs/access.log /opt/nginx/nginx-logs/error.log
+
 q systemctl enable fail2ban
-q systemctl restart fail2ban
-ok "Fail2ban запущен"
+if systemctl restart fail2ban >> "$SETUP_LOG" 2>&1; then
+    ok "Fail2ban запущен"
+else
+    warn "Fail2ban не стартовал — проверь $SETUP_LOG и 'fail2ban-client -d'"
+fi
 
 # ════════════════════════════════════════════════════════════
 #  ПУНКТ 5 — Автообновления
@@ -961,7 +976,8 @@ if command -v docker &>/dev/null; then
     ok "Docker уже установлен: $(docker --version | cut -d' ' -f3 | tr -d ',')"
 else
     qs "Устанавливаем зависимости" \
-        sudo apt-get install -y ca-certificates curl gnupg
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install "${APT_OPTS[@]}" \
+            ca-certificates curl gnupg
 
     sudo install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
@@ -977,7 +993,8 @@ $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
 
     qs "Обновляем индекс пакетов" sudo apt-get update
     qs "Устанавливаем Docker Engine" \
-        sudo apt-get install -y \
+        sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a \
+            apt-get install "${APT_OPTS[@]}" \
             docker-ce docker-ce-cli containerd.io \
             docker-buildx-plugin docker-compose-plugin
     ok "Docker установлен"
