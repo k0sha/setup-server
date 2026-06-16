@@ -908,10 +908,20 @@ if [[ "$DEPLOY_PHASE" == true ]]; then
 # Если запущен от root с --deploy (отложенный деплой) — переходим на DEPLOY_USER
 if [[ $EUID -eq 0 ]]; then
     _ROOT_CFG="$INSTALL_DIR/$CONFIG_NAME"
-    [[ -f "$_ROOT_CFG" ]] && source "$_ROOT_CFG" 2>/dev/null || true
-    [[ -z "${DEPLOY_USER:-}" ]] && {
-        echo -e "${RED}✖ DEPLOY_USER не найден в конфиге $INSTALL_DIR/$CONFIG_NAME${NC}"; exit 1
-    }
+    if [[ ! -f "$_ROOT_CFG" ]]; then
+        echo -e "${RED}✖ Конфиг $_ROOT_CFG не найден — нечего деплоить.${NC}"
+        echo -e "${YELLOW}  Похоже, предыдущий прогон не дошёл до конца или конфиг удалён.${NC}"
+        echo -e "${YELLOW}  Запусти полную настройку заново (она пересоздаст конфиг и сама перейдёт к деплою):${NC}"
+        echo -e "      ${GREEN}sudo bash $INSTALL_DIR/$SCRIPT_NAME${NC}"
+        exit 1
+    fi
+    source "$_ROOT_CFG" 2>/dev/null || true
+    if [[ -z "${DEPLOY_USER:-}" ]]; then
+        echo -e "${RED}✖ В конфиге $_ROOT_CFG нет DEPLOY_USER — он повреждён или неполный.${NC}"
+        echo -e "${YELLOW}  Запусти полную настройку заново, чтобы пересоздать конфиг:${NC}"
+        echo -e "      ${GREEN}sudo bash $INSTALL_DIR/$SCRIPT_NAME${NC}"
+        exit 1
+    fi
     echo "$DEPLOY_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/99-deploy
     chmod 440 /etc/sudoers.d/99-deploy
     cp "$INSTALL_DIR/$SCRIPT_NAME" "$DEPLOY_SCRIPT"
@@ -949,9 +959,11 @@ _cleanup_deploy() {
     rm -f "${_LOGFIFO}" "${_NGXFIFO}" 2>/dev/null || true
     rm -f "$DEPLOY_CONFIG" 2>/dev/null || true
     sudo rm -f "$DEPLOY_SCRIPT" 2>/dev/null || true
-    sudo rm -f "$INSTALL_DIR/$CONFIG_NAME" 2>/dev/null || true
     sudo rm -f /etc/sudoers.d/99-deploy 2>/dev/null || true
-    if [[ "$_DEPLOY_SUCCESS" != true ]]; then
+    if [[ "$_DEPLOY_SUCCESS" == true ]]; then
+        # конфиг чистим только при успехе, иначе повторный --deploy его не найдёт
+        sudo rm -f "$INSTALL_DIR/$CONFIG_NAME" 2>/dev/null || true
+    else
         echo ""
         warn "Деплой прерван. Для повтора: sudo bash $INSTALL_DIR/$SCRIPT_NAME --deploy"
     fi
@@ -974,6 +986,16 @@ sep; info "ШАГ 1 — Docker Engine"; sep
 
 if command -v docker &>/dev/null; then
     ok "Docker уже установлен: $(docker --version | cut -d' ' -f3 | tr -d ',')"
+    # docker.io из репозитория Ubuntu ставится без плагина compose v2 —
+    # без него 'docker compose -f' падает с "unknown shorthand flag: 'f'"
+    if ! docker compose version &>/dev/null; then
+        warn "Плагин 'docker compose' отсутствует — доустанавливаем"
+        qs "Устанавливаем docker compose plugin" bash -c \
+            'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-v2 \
+             || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y docker-compose-plugin'
+        docker compose version &>/dev/null \
+            || err "docker compose недоступен. Поставь вручную: sudo apt-get install -y docker-compose-v2"
+    fi
 else
     qs "Устанавливаем зависимости" \
         sudo DEBIAN_FRONTEND=noninteractive apt-get install "${APT_OPTS[@]}" \
