@@ -537,8 +537,10 @@ qs "Устанавливаем обновления (apt upgrade)" apt-get upgra
 echo ""
 
 q timedatectl set-timezone "$TIMEZONE"
-q systemctl enable --now systemd-timesyncd
-q timedatectl set-ntp true
+qo apt-get install -y systemd-timesyncd
+qo systemctl unmask systemd-timesyncd
+qo systemctl enable --now systemd-timesyncd
+qo timedatectl set-ntp true
 ok "Timezone: $TIMEZONE, NTP включён"
 
 q hostnamectl set-hostname "$SERVER_HOSTNAME"
@@ -629,6 +631,10 @@ read -rp "Вход на порту $SSH_PORT проверен и работае�
 # ════════════════════════════════════════════════════════════
 echo ""
 sep; info "ПУНКТ 3 — Настройка UFW"; sep
+
+if ! command -v ufw &>/dev/null; then
+    qs "Устанавливаем ufw (нет в системе)" bash -c "apt-get update && apt-get install -y ufw"
+fi
 
 q ufw --force reset
 q ufw default deny incoming
